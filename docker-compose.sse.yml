@@ -1,0 +1,41 @@
+# Docker Compose for SSE/HTTP deployment
+# Use this for local testing of the remote deployment configuration
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in your credentials
+#   2. docker-compose -f docker-compose.sse.yml up --build
+#   3. Access at http://localhost:8000
+#
+version: '3.8'
+
+services:
+  telegram-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.sse
+    container_name: telegram-mcp-sse
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    environment:
+      - PORT=${PORT:-8000}
+      - HOST=0.0.0.0
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_SESSION_STRING=${TELEGRAM_SESSION_STRING}
+      - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN:-}
+      - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
+      - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
+    # Optional: mount for persistent session file (if not using SESSION_STRING)
+    # volumes:
+    #   - telegram-data:/home/appuser/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+# Optional: named volume for session persistence
+# volumes:
+#   telegram-data:
