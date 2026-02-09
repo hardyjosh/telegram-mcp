@@ -31,6 +31,21 @@ As you can see, the AI can seamlessly interact with your Telegram account, retri
 
 A full-featured Telegram integration for Claude, Cursor, and any MCP-compatible client, powered by [Telethon](https://docs.telethon.dev/) and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). This project lets you interact with your Telegram account programmatically, automating everything from messaging to group management.
 
+---
+
+## 🍴 About This Fork
+
+This is a fork of [chigwell/telegram-mcp](https://github.com/chigwell/telegram-mcp) that adds **remote deployment support** via SSE (Server-Sent Events) transport with OAuth 2.0 authentication.
+
+### What's New in This Fork
+
+- **SSE Transport Server** (`src/server_sse.py`) - Enables remote connections instead of local stdio only
+- **OAuth 2.0 Authentication** - Secure Client ID/Secret validation for remote access
+- **Docker Support** - `Dockerfile.sse` and `docker-compose.sse.yml` for containerized deployment
+- **Fly.io Configuration** - Ready-to-deploy `fly.toml` for cloud hosting
+- **Nix Flake** - Reproducible development environment
+
+This allows you to deploy the Telegram MCP server to the cloud and connect to it from **Claude.ai** (via custom connectors), not just local clients like Claude Desktop or Cursor.
 
 ---
 
@@ -236,6 +251,89 @@ docker run -it --rm \
 *   Replace placeholders with your actual credentials.
 *   Use `-e TELEGRAM_SESSION_NAME=your_session_file_name` instead of `TELEGRAM_SESSION_STRING` if you prefer file-based sessions (requires volume mounting, see `docker-compose.yml` for an example).
 *   The `-it` flags are crucial for interacting with the server.
+
+---
+
+## ☁️ Remote Deployment (Fly.io)
+
+This fork supports deploying the MCP server remotely so you can use it with **Claude.ai** via custom connectors.
+
+### 1. Prerequisites
+
+- [Fly.io account](https://fly.io) (free tier available)
+- [flyctl CLI](https://fly.io/docs/hands-on/install-flyctl/) installed
+- Your Telegram credentials (API ID, API Hash, Session String)
+
+### 2. Create the Fly App
+
+```bash
+fly apps create your-app-name
+```
+
+Update `fly.toml` with your app name if different from the default.
+
+### 3. Set Secrets
+
+```bash
+fly secrets set \
+  TELEGRAM_API_ID="your_api_id" \
+  TELEGRAM_API_HASH="your_api_hash" \
+  TELEGRAM_SESSION_STRING="your_session_string" \
+  OAUTH_CLIENT_ID="your_client_id" \
+  OAUTH_CLIENT_SECRET="your_client_secret" \
+  --app your-app-name
+```
+
+Generate secure OAuth credentials:
+```bash
+# Generate a client ID
+openssl rand -hex 16
+
+# Generate a client secret
+openssl rand -hex 32
+```
+
+### 4. Deploy
+
+```bash
+fly deploy --app your-app-name
+```
+
+Your server will be available at `https://your-app-name.fly.dev`
+
+### 5. Add to Claude.ai
+
+1. Go to **Claude.ai → Settings → Connectors → Add Custom Connector**
+2. Enter:
+   - **URL**: `https://your-app-name.fly.dev`
+   - **Client ID**: Your `OAUTH_CLIENT_ID`
+   - **Client Secret**: Your `OAUTH_CLIENT_SECRET`
+3. Click **Connect** and authorize
+
+You can now use all Telegram tools directly in Claude.ai conversations!
+
+### Running Locally with SSE
+
+For local testing with the SSE server:
+
+```bash
+# Set environment variables
+export TELEGRAM_API_ID="your_api_id"
+export TELEGRAM_API_HASH="your_api_hash"
+export TELEGRAM_SESSION_STRING="your_session_string"
+export OAUTH_CLIENT_ID="your_client_id"
+export OAUTH_CLIENT_SECRET="your_client_secret"
+
+# Run the SSE server
+uv run python src/server_sse.py
+```
+
+Or with Docker:
+```bash
+docker-compose -f docker-compose.sse.yml up --build
+```
+
+The server will be available at `http://localhost:8000`. Use a tool like [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to test locally.
 
 ---
 
@@ -681,7 +779,9 @@ This project is licensed under the [Apache 2.0 License](LICENSE).
 
 ---
 
-**Maintained by [@chigwell](https://github.com/chigwell) and [@l1v0n1](https://github.com/l1v0n1). PRs welcome!**
+**Original project maintained by [@chigwell](https://github.com/chigwell) and [@l1v0n1](https://github.com/l1v0n1).**
+
+**This fork with remote deployment support maintained by [@hardyjosh](https://github.com/hardyjosh).**
 
 ## Star History
 
