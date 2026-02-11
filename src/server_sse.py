@@ -257,7 +257,8 @@ async def token_endpoint(request: Request) -> JSONResponse:
 
 async def info_page(request: Request) -> HTMLResponse:
     """Landing page with setup instructions."""
-    return HTMLResponse(f"""
+    return HTMLResponse(
+        f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -310,7 +311,8 @@ async def info_page(request: Request) -> HTMLResponse:
         </script>
     </body>
     </html>
-    """)
+    """
+    )
 
 
 # ============================================================================
