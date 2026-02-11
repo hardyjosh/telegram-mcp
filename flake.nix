@@ -10,13 +10,20 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        python = pkgs.python313;
       in
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Python environment
-            python313
+            python
             uv
+
+            # Linting & formatting (pinned via nixpkgs)
+            python313Packages.black
+            python313Packages.flake8
+            python313Packages.pytest
+            python313Packages.pytest-asyncio
 
             # Docker tools
             docker
@@ -41,14 +48,17 @@
             echo "🔗 Telegram MCP development environment"
             echo ""
             echo "Available tools:"
-            echo "  python3  - Python 3.13"
-            echo "  uv       - Fast Python package manager"
-            echo "  docker   - Container runtime"
-            echo "  docker-compose - Container orchestration"
+            echo "  python3   - Python 3.13"
+            echo "  uv        - Fast Python package manager"
+            echo "  black     - Code formatter (pinned via nix)"
+            echo "  flake8    - Linter (pinned via nix)"
+            echo "  pytest    - Test runner (pinned via nix)"
             echo ""
             echo "Quick start:"
-            echo "  uv sync              # Install Python dependencies"
-            echo "  uv run python main.py  # Run the MCP server (stdio)"
+            echo "  uv sync                    # Install Python dependencies"
+            echo "  uv run python main.py      # Run the MCP server (stdio)"
+            echo "  black --check .            # Check formatting"
+            echo "  pytest -v                  # Run tests"
             echo "  docker-compose up --build  # Build and run in Docker"
             echo ""
           '';
