@@ -105,8 +105,10 @@ async def test_temp_file_cleanup():
         created_temps.append(f.name)
         return f
 
-    with patch("main.client", mock_client), \
-         patch("main.tempfile.NamedTemporaryFile", side_effect=tracking_ntf):
+    with (
+        patch("main.client", mock_client),
+        patch("main.tempfile.NamedTemporaryFile", side_effect=tracking_ntf),
+    ):
         await download_media_base64(chat_id=123, message_id=1)
 
     for path in created_temps:

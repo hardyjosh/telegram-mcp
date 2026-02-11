@@ -1710,7 +1710,9 @@ async def download_media(chat_id: Union[int, str], message_id: int, file_path: s
 
 
 @mcp.tool(
-    annotations=ToolAnnotations(title="Download Media as Base64", openWorldHint=True, readOnlyHint=True)
+    annotations=ToolAnnotations(
+        title="Download Media as Base64", openWorldHint=True, readOnlyHint=True
+    )
 )
 @validate_id("chat_id")
 async def download_media_base64(chat_id: Union[int, str], message_id: int) -> str:
