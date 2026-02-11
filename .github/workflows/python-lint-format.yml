@@ -16,22 +16,15 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
         with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install black flake8
+          nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Lint with Flake8
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+          nix develop --command flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          nix develop --command flake8 . --count --exit-zero --max-complexity=10 --max-line-length=99 --statistics
 
       - name: Check formatting with Black
-        run: |
-          black --check .
+        run: nix develop --command black --check .

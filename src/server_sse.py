@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import the existing MCP server and Telegram client
 from main import mcp, client
 
-
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -87,8 +86,7 @@ class BearerAuthMiddleware:
 
             if not auth_header.startswith("Bearer "):
                 response = JSONResponse(
-                    {"error": "Missing or invalid Authorization header"},
-                    status_code=401
+                    {"error": "Missing or invalid Authorization header"}, status_code=401
                 )
                 await response(scope, receive, send)
                 return
@@ -99,10 +97,7 @@ class BearerAuthMiddleware:
             is_valid = token in VALID_TOKENS or (BEARER_TOKEN and token == BEARER_TOKEN)
 
             if not is_valid:
-                response = JSONResponse(
-                    {"error": "Invalid token"},
-                    status_code=401
-                )
+                response = JSONResponse({"error": "Invalid token"}, status_code=401)
                 await response(scope, receive, send)
                 return
 
@@ -113,6 +108,7 @@ class BearerAuthMiddleware:
 # Health & Info Endpoints
 # ============================================================================
 
+
 async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint for load balancers and monitoring."""
     # Check if Telegram client is connected
@@ -121,17 +117,20 @@ async def health_check(request: Request) -> JSONResponse:
     except Exception:
         connected = False
 
-    return JSONResponse({
-        "status": "ok" if connected else "degraded",
-        "service": "telegram-mcp",
-        "telegram_connected": connected,
-        "auth_mode": "bearer" if BEARER_TOKEN else "none"
-    })
+    return JSONResponse(
+        {
+            "status": "ok" if connected else "degraded",
+            "service": "telegram-mcp",
+            "telegram_connected": connected,
+            "auth_mode": "bearer" if BEARER_TOKEN else "none",
+        }
+    )
 
 
 # ============================================================================
 # OAuth Endpoints (for Claude connector discovery)
 # ============================================================================
+
 
 async def oauth_metadata(request: Request) -> JSONResponse:
     """
@@ -144,15 +143,17 @@ async def oauth_metadata(request: Request) -> JSONResponse:
     if forwarded_proto == "https":
         base_url = base_url.replace("http://", "https://")
 
-    return JSONResponse({
-        "issuer": base_url,
-        "authorization_endpoint": f"{base_url}/authorize",
-        "token_endpoint": f"{base_url}/token",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
-        "code_challenge_methods_supported": ["S256"]
-    })
+    return JSONResponse(
+        {
+            "issuer": base_url,
+            "authorization_endpoint": f"{base_url}/authorize",
+            "token_endpoint": f"{base_url}/token",
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code"],
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+    )
 
 
 async def authorize_endpoint(request: Request):
@@ -168,7 +169,7 @@ async def authorize_endpoint(request: Request):
         separator = "&" if "?" in redirect_uri else "?"
         return HTMLResponse(
             status_code=302,
-            headers={"Location": f"{redirect_uri}{separator}code=authless-code&state={state}"}
+            headers={"Location": f"{redirect_uri}{separator}code=authless-code&state={state}"},
         )
 
     return JSONResponse({"error": "redirect_uri required"}, status_code=400)
@@ -231,12 +232,12 @@ async def token_endpoint(request: Request) -> JSONResponse:
         if client_id != OAUTH_CLIENT_ID:
             return JSONResponse(
                 {"error": "invalid_client", "error_description": "Invalid client_id"},
-                status_code=401
+                status_code=401,
             )
         if client_secret != OAUTH_CLIENT_SECRET:
             return JSONResponse(
                 {"error": "invalid_client", "error_description": "Invalid client_secret"},
-                status_code=401
+                status_code=401,
             )
 
     # Generate a real access token (random, secure)
@@ -245,20 +246,19 @@ async def token_endpoint(request: Request) -> JSONResponse:
     # Store the token for validation (in-memory for now)
     # In production, you'd use Redis or a database
     global VALID_TOKENS
-    if 'VALID_TOKENS' not in globals():
+    if "VALID_TOKENS" not in globals():
         VALID_TOKENS = set()
     VALID_TOKENS.add(access_token)
 
-    return JSONResponse({
-        "access_token": access_token,
-        "token_type": "Bearer",
-        "expires_in": 86400
-    })
+    return JSONResponse(
+        {"access_token": access_token, "token_type": "Bearer", "expires_in": 86400}
+    )
 
 
 async def info_page(request: Request) -> HTMLResponse:
     """Landing page with setup instructions."""
-    return HTMLResponse(f"""
+    return HTMLResponse(
+        f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -311,12 +311,14 @@ async def info_page(request: Request) -> HTMLResponse:
         </script>
     </body>
     </html>
-    """)
+    """
+    )
 
 
 # ============================================================================
 # Application Setup
 # ============================================================================
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -366,7 +368,7 @@ def create_app_with_lifespan() -> Starlette:
     if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
         app = BearerAuthMiddleware(
             app,
-            protected_paths=["/sse", "/messages", "/mcp"]
+            protected_paths=["/sse", "/messages", "/mcp"],
             # Note: Root "/" is also MCP but handled by exclude logic below
         )
 
@@ -375,13 +377,19 @@ def create_app_with_lifespan() -> Starlette:
 
 def main():
     """Main entry point for SSE server."""
-    auth_mode = "OAuth (Client ID/Secret)" if (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET) else "None (INSECURE!)"
+    auth_mode = (
+        "OAuth (Client ID/Secret)"
+        if (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET)
+        else "None (INSECURE!)"
+    )
     print(f"Starting Telegram MCP Server (SSE mode)")
     print(f"  Host: {HOST}")
     print(f"  Port: {PORT}")
     print(f"  Auth: {auth_mode}")
     if not (OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET):
-        print(f"  WARNING: No authentication configured! Set OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET")
+        print(
+            f"  WARNING: No authentication configured! Set OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET"
+        )
     print()
 
     # Create app with lifespan (Telegram client starts in uvicorn's event loop)
