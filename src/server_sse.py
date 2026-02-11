@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import the existing MCP server and Telegram client
 from main import mcp, client
 
-
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -258,8 +257,7 @@ async def token_endpoint(request: Request) -> JSONResponse:
 
 async def info_page(request: Request) -> HTMLResponse:
     """Landing page with setup instructions."""
-    return HTMLResponse(
-        f"""
+    return HTMLResponse(f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -312,8 +310,7 @@ async def info_page(request: Request) -> HTMLResponse:
         </script>
     </body>
     </html>
-    """
-    )
+    """)
 
 
 # ============================================================================
