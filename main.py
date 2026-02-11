@@ -2,10 +2,12 @@ import os
 import sys
 import json
 import time
+import base64
 import asyncio
 import sqlite3
 import logging
 import mimetypes
+import tempfile
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Dict, Optional, Union, Any
@@ -1704,6 +1706,77 @@ async def download_media(chat_id: Union[int, str], message_id: int, file_path: s
             chat_id=chat_id,
             message_id=message_id,
             file_path=file_path,
+        )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(title="Download Media as Base64", openWorldHint=True, readOnlyHint=True)
+)
+@validate_id("chat_id")
+async def download_media_base64(chat_id: Union[int, str], message_id: int) -> str:
+    """
+    Download media from a message and return it as base64-encoded content.
+    Unlike download_media, this does not require a file path and returns
+    the file content directly, making it suitable for remote MCP servers
+    where the client cannot access the server's filesystem.
+    Args:
+        chat_id: The chat ID or username.
+        message_id: The message ID containing the media.
+    Returns:
+        JSON string with keys: filename, mime_type, size_bytes, base64_data
+    """
+    try:
+        entity = await client.get_entity(chat_id)
+        msg = await client.get_messages(entity, ids=message_id)
+        if not msg or not msg.media:
+            return "No media found in the specified message."
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            await client.download_media(msg, file=tmp_path)
+            if not os.path.isfile(tmp_path) or os.path.getsize(tmp_path) == 0:
+                return "Download failed: file not created or empty."
+
+            file_size = os.path.getsize(tmp_path)
+
+            # Determine filename and mime type from the media
+            filename = None
+            if hasattr(msg.media, "document") and msg.media.document:
+                for attr in msg.media.document.attributes:
+                    if hasattr(attr, "file_name"):
+                        filename = attr.file_name
+                        break
+            if not filename:
+                filename = os.path.basename(tmp_path)
+
+            mime_type, _ = mimetypes.guess_type(filename)
+            if not mime_type and hasattr(msg.media, "document") and msg.media.document:
+                mime_type = msg.media.document.mime_type
+            if not mime_type:
+                mime_type = "application/octet-stream"
+
+            with open(tmp_path, "rb") as f:
+                b64_data = base64.b64encode(f.read()).decode("ascii")
+
+            return json.dumps(
+                {
+                    "filename": filename,
+                    "mime_type": mime_type,
+                    "size_bytes": file_size,
+                    "base64_data": b64_data,
+                }
+            )
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    except Exception as e:
+        return log_and_format_error(
+            "download_media_base64",
+            e,
+            chat_id=chat_id,
+            message_id=message_id,
         )
 
 
