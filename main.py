@@ -42,6 +42,8 @@ import re
 from functools import wraps
 import telethon.errors.rpcerrorlist
 
+import permissions as perms
+
 
 class ValidationError(Exception):
     """Custom exception for validation errors."""
@@ -185,11 +187,20 @@ def validate_id(*param_names_to_validate):
     Decorator to validate chat_id and user_id parameters, including lists of IDs.
     It checks for valid integer ranges, string representations of integers,
     and username formats.
+
+    Also enforces chat permissions when a chat_id or group_id parameter is present.
     """
 
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            # Enforce permissions for chat-scoped tools
+            chat_id = kwargs.get("chat_id") or kwargs.get("group_id")
+            if chat_id is not None:
+                allowed, reason = perms.check_permission(func.__name__, chat_id)
+                if not allowed:
+                    return f"Permission denied: {reason}"
+
             for param_name in param_names_to_validate:
                 if param_name not in kwargs or kwargs[param_name] is None:
                     continue
@@ -262,6 +273,31 @@ def validate_id(*param_names_to_validate):
         return wrapper
 
     return decorator
+
+
+def enforce_permissions(func):
+    """Decorator that enforces chat permissions before tool execution.
+
+    Checks the permissions database to verify:
+    1. The required global permission (read/write) is enabled
+    2. The target chat is in the allowlist and enabled
+
+    If permissions are not configured (no DB / empty allowlist), all calls
+    are allowed (open by default, restrictive when configured).
+    """
+
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        # Find chat_id in kwargs (most tools use 'chat_id', some use 'group_id')
+        chat_id = kwargs.get("chat_id") or kwargs.get("group_id")
+
+        allowed, reason = perms.check_permission(func.__name__, chat_id)
+        if not allowed:
+            return f"Permission denied: {reason}"
+
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 
 def format_entity(entity) -> Dict[str, Any]:
@@ -350,6 +386,13 @@ async def get_chats(page: int = 1, page_size: int = 20) -> str:
     """
     try:
         dialogs = await client.get_dialogs()
+
+        # Filter to allowlisted chats if permissions are configured
+        allowlisted = perms.get_allowlisted_chats()
+        if allowlisted:
+            allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
+            dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
+
         start = (page - 1) * page_size
         end = start + page_size
         if start >= len(dialogs):
@@ -931,6 +974,12 @@ async def list_chats(chat_type: str = None, limit: int = 20) -> str:
     """
     try:
         dialogs = await client.get_dialogs(limit=limit)
+
+        # Filter to allowlisted chats if permissions are configured
+        allowlisted = perms.get_allowlisted_chats()
+        if allowlisted:
+            allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
+            dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
 
         results = []
         for dialog in dialogs:
@@ -4205,6 +4254,9 @@ async def reorder_folders(folder_ids: List[int]) -> str:
 
 async def _main() -> None:
     try:
+        # Initialise permissions database
+        perms.init_db()
+
         # Start the Telethon client non-interactively
         print("Starting Telegram client...")
         await client.start()
