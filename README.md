@@ -767,10 +767,10 @@ If no chats are allowlisted, everything works as before (open access). Once you 
      ▲                                                   ▲
      │ /start                                           │ tool calls
      │                                                   │
-   Pete                                            AI Agent
+   You                                             AI Agent
 ```
 
-The **permissions bot** and the **MCP server** share the same SQLite database. Pete manages permissions via the bot's inline keyboard UI. The MCP server enforces those permissions on every tool call.
+The **permissions bot** and the **MCP server** share the same SQLite database. You manage permissions via the bot's inline keyboard UI. The MCP server enforces those permissions on every tool call.
 
 ### Setup
 
