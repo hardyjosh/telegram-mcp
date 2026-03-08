@@ -824,10 +824,10 @@ Select chats to allow access:
 
 ✅ = allowed, ⬜ = not allowed
 
-[✅ St0x <> Partner A     ]
-[✅ St0x <> Partner B     ]
+[✅ Work Project Alpha    ]
+[✅ Work Project Beta     ]
 [⬜ Family Group          ]
-[⬜ Crypto Signals        ]
+[⬜ Random Chat           ]
 
       [◀️] 1/4 [▶️]
 [⬅️ Back to Permissions   ]
