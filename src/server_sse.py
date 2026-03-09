@@ -348,8 +348,8 @@ async def lifespan(app):
         chat_id = arguments.get("chat_id") or arguments.get("group_id")
         allowed, reason = perms.check_permission(name, chat_id)
         if not allowed:
-            from mcp.types import TextContent
-            return [TextContent(type="text", text=f"Permission denied: {reason}")]
+            # Return as a plain string — same as what tool functions return
+            return f"Permission denied: {reason}"
         return await _original_call_tool(name, arguments, **kwargs)
 
     mcp._tool_manager.call_tool = _checked_call_tool
