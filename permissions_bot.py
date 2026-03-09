@@ -17,7 +17,6 @@ import asyncio
 import math
 import os
 import sys
-import time
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events, Button
@@ -38,11 +37,8 @@ SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
 TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 
 CHATS_PER_PAGE = 8
-CHAT_CACHE_TTL = 300  # 5 minutes
-
-# Cached chat list
+# Cached chat list (fetched once on /start, refreshed on demand)
 _chat_cache: list[dict] = []
-_chat_cache_time: float = 0
 
 # Bot client (uses bot token)
 bot = TelegramClient("permissions_bot", TELEGRAM_API_ID, TELEGRAM_API_HASH)
@@ -63,8 +59,8 @@ def is_owner(event) -> bool:
 
 async def get_user_chats(force_refresh: bool = False) -> list[dict]:
     """Fetch the user's chat list via their Telethon session (cached)."""
-    global _chat_cache, _chat_cache_time
-    if not force_refresh and _chat_cache and (time.time() - _chat_cache_time) < CHAT_CACHE_TTL:
+    global _chat_cache
+    if not force_refresh and _chat_cache:
         return _chat_cache
     dialogs = await user_client.get_dialogs()
     chats = []
@@ -74,7 +70,6 @@ async def get_user_chats(force_refresh: bool = False) -> list[dict]:
         title = getattr(entity, "title", None) or getattr(entity, "first_name", "Unknown")
         chats.append({"chat_id": chat_id, "title": title})
     _chat_cache = chats
-    _chat_cache_time = time.time()
     return chats
 
 
@@ -128,8 +123,11 @@ async def build_chats_keyboard(page: int = 0) -> list[list[Button]]:
         nav.append(Button.inline("Next \u25b6\ufe0f", data=f"chats:{page + 1}"))
     buttons.append(nav)
 
-    # Back button
-    buttons.append([Button.inline("\u2b05\ufe0f Back to Permissions", data="home")])
+    # Refresh + Back buttons
+    buttons.append([
+        Button.inline("\U0001f504 Refresh", data="refresh_chats"),
+        Button.inline("\u2b05\ufe0f Back", data="home"),
+    ])
 
     return buttons
 
@@ -220,6 +218,22 @@ async def toggle_chat_handler(event):
         permissions.toggle_chat(chat_id)
 
     keyboard = await build_chats_keyboard(page)
+    await event.edit(
+        "**Select chats to allow access:**\n\n"
+        "\u2705 = allowed, \u2b1c = not allowed",
+        buttons=keyboard,
+    )
+
+
+@bot.on(events.CallbackQuery(pattern=b"refresh_chats"))
+async def refresh_chats_handler(event):
+    """Force-refresh the chat list and show page 0."""
+    if not is_owner(event):
+        return
+    await event.answer("Refreshing chats...")
+
+    await get_user_chats(force_refresh=True)
+    keyboard = await build_chats_keyboard(0)
     await event.edit(
         "**Select chats to allow access:**\n\n"
         "\u2705 = allowed, \u2b1c = not allowed",
