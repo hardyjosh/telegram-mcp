@@ -331,14 +331,15 @@ async def lifespan(app):
     tools_info = []
     for tool_name, tool in mcp._tool_manager._tools.items():
         annotations = {}
-        if hasattr(tool, 'tool') and hasattr(tool.tool, 'annotations') and tool.tool.annotations:
+        if tool.annotations:
             annotations = {
-                "readOnlyHint": getattr(tool.tool.annotations, "readOnlyHint", False),
-                "destructiveHint": getattr(tool.tool.annotations, "destructiveHint", False),
+                "readOnlyHint": getattr(tool.annotations, "readOnlyHint", False),
+                "destructiveHint": getattr(tool.annotations, "destructiveHint", False),
             }
         tools_info.append({"name": tool_name, "annotations": annotations})
     perms.build_tool_permission_map(tools_info)
-    print(f"Permission map built: {len(tools_info)} tools mapped")
+    write_tools = [t["name"] for t in tools_info if t["annotations"].get("destructiveHint")]
+    print(f"Permission map built: {len(tools_info)} tools, {len(write_tools)} write-gated: {write_tools[:5]}...")
 
     print("Starting Telegram client...")
     await client.start()
