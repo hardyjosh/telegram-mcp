@@ -4252,10 +4252,48 @@ async def reorder_folders(folder_ids: List[int]) -> str:
         )
 
 
+# --- Permission enforcement ---
+# Wrap mcp.call_tool to check permissions before executing any tool.
+_original_call_tool = mcp.call_tool
+
+
+async def _checked_call_tool(name: str, arguments: dict) -> Any:
+    """Permission-checking wrapper around tool execution."""
+    # Extract chat_id from arguments if present
+    chat_id = arguments.get("chat_id")
+    if chat_id is not None:
+        try:
+            chat_id = int(chat_id)
+        except (ValueError, TypeError):
+            chat_id = None
+
+    allowed, reason = perms.check_permission(name, chat_id)
+    if not allowed:
+        from mcp.types import TextContent
+        return [TextContent(type="text", text=f"Permission denied: {reason}")]
+
+    return await _original_call_tool(name, arguments)
+
+
+mcp.call_tool = _checked_call_tool
+
+
 async def _main() -> None:
     try:
         # Initialise permissions database
         perms.init_db()
+
+        # Build permission map from registered tool annotations
+        tools_info = []
+        for tool_name, tool in mcp._tool_manager._tools.items():
+            annotations = {}
+            if hasattr(tool, 'tool') and hasattr(tool.tool, 'annotations') and tool.tool.annotations:
+                annotations = {
+                    "readOnlyHint": getattr(tool.tool.annotations, "readOnlyHint", False),
+                    "destructiveHint": getattr(tool.tool.annotations, "destructiveHint", False),
+                }
+            tools_info.append({"name": tool_name, "annotations": annotations})
+        perms.build_tool_permission_map(tools_info)
 
         # Start the Telethon client non-interactively
         print("Starting Telegram client...")
