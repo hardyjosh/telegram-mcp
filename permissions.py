@@ -33,13 +33,71 @@ class Permission(StrEnum):
     READ = "read"
     WRITE = "write"
     DRAFTS = "drafts"
+    CONTACTS = "contacts"
+    GROUPS = "groups"
+    PROFILE = "profile"
+    PRIVACY = "privacy"
 
 
-# Default permissions for newly allowlisted chats
-DEFAULT_PERMISSIONS = {Permission.READ: True, Permission.WRITE: False, Permission.DRAFTS: False}
+# Default permissions — only read is on
+DEFAULT_PERMISSIONS = {
+    Permission.READ: True,
+    Permission.WRITE: False,
+    Permission.DRAFTS: False,
+    Permission.CONTACTS: False,
+    Permission.GROUPS: False,
+    Permission.PROFILE: False,
+    Permission.PRIVACY: False,
+}
 
-# Tools that should be gated by the DRAFTS permission (not auto-detected from annotations)
-DRAFT_TOOLS = {"save_draft", "get_drafts", "clear_draft"}
+# Explicit tool → permission mappings (overrides annotation-based detection)
+TOOL_PERMISSION_OVERRIDES: dict[str, Permission] = {
+    # Drafts
+    "save_draft": Permission.DRAFTS,
+    "get_drafts": Permission.DRAFTS,
+    "clear_draft": Permission.DRAFTS,
+    # Contacts
+    "list_contacts": Permission.CONTACTS,
+    "search_contacts": Permission.CONTACTS,
+    "get_contact_ids": Permission.CONTACTS,
+    "add_contact": Permission.CONTACTS,
+    "delete_contact": Permission.CONTACTS,
+    "import_contacts": Permission.CONTACTS,
+    "export_contacts": Permission.CONTACTS,
+    "get_contact_chats": Permission.CONTACTS,
+    "get_direct_chat_by_contact": Permission.CONTACTS,
+    "get_last_interaction": Permission.CONTACTS,
+    "block_user": Permission.CONTACTS,
+    "unblock_user": Permission.CONTACTS,
+    "get_blocked_users": Permission.CONTACTS,
+    # Group/channel management
+    "create_group": Permission.GROUPS,
+    "create_channel": Permission.GROUPS,
+    "invite_to_group": Permission.GROUPS,
+    "leave_chat": Permission.GROUPS,
+    "edit_chat_title": Permission.GROUPS,
+    "edit_chat_photo": Permission.GROUPS,
+    "delete_chat_photo": Permission.GROUPS,
+    "promote_admin": Permission.GROUPS,
+    "demote_admin": Permission.GROUPS,
+    "ban_user": Permission.GROUPS,
+    "unban_user": Permission.GROUPS,
+    "get_admins": Permission.GROUPS,
+    "get_banned_users": Permission.GROUPS,
+    "get_invite_link": Permission.GROUPS,
+    "join_chat_by_link": Permission.GROUPS,
+    "export_chat_invite": Permission.GROUPS,
+    "import_chat_invite": Permission.GROUPS,
+    "subscribe_public_channel": Permission.GROUPS,
+    # Profile
+    "update_profile": Permission.PROFILE,
+    "set_profile_photo": Permission.PROFILE,
+    "delete_profile_photo": Permission.PROFILE,
+    "get_user_photos": Permission.PROFILE,
+    # Privacy
+    "get_privacy_settings": Permission.PRIVACY,
+    "set_privacy_settings": Permission.PRIVACY,
+}
 
 # Map tool names to required permissions.
 # Tools not in this map are considered global (no chat-level restriction).
@@ -255,9 +313,9 @@ def build_tool_permission_map(tools_with_annotations: list[dict]) -> None:
 
         # Only map tools that have chat-level scope
         # (we'll check if they take chat_id at enforcement time)
-        # Draft tools get their own permission category
-        if name in DRAFT_TOOLS:
-            TOOL_PERMISSION_MAP[name] = Permission.DRAFTS
+        # Explicit overrides take priority
+        if name in TOOL_PERMISSION_OVERRIDES:
+            TOOL_PERMISSION_MAP[name] = TOOL_PERMISSION_OVERRIDES[name]
         elif annotations.get("readOnlyHint"):
             TOOL_PERMISSION_MAP[name] = Permission.READ
         elif annotations.get("destructiveHint"):
