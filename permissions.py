@@ -215,30 +215,23 @@ def check_permission(tool_name: str, chat_id: Optional[int] = None) -> tuple[boo
     Returns:
         (allowed, reason) tuple.
     """
-    # Tools not in the permission map are global — always allowed
+    # Check global read/write permission if tool is in the permission map
     required_perm = TOOL_PERMISSION_MAP.get(tool_name)
-    if required_perm is None:
-        return True, ""
+    if required_perm is not None:
+        global_perms = get_global_permissions()
+        if not global_perms.get(required_perm.value, False):
+            return False, f"Global '{required_perm.value}' permission is disabled"
 
-    # Check global permission
-    global_perms = get_global_permissions()
-    if not global_perms.get(required_perm.value, False):
-        return False, f"Global '{required_perm.value}' permission is disabled"
+    # If tool targets a chat, enforce allowlist regardless of read/write
+    if chat_id is not None:
+        try:
+            chat_id_int = int(chat_id)
+        except (ValueError, TypeError):
+            # Username-based — can't filter by ID, allow if global perm passed
+            return True, ""
 
-    # If no chat_id, allow (tool doesn't target a specific chat)
-    if chat_id is None:
-        return True, ""
-
-    # Normalise chat_id
-    try:
-        chat_id_int = int(chat_id)
-    except (ValueError, TypeError):
-        # Username-based — we can't filter these by ID, allow if global perm is on
-        return True, ""
-
-    # Check chat allowlist
-    if not is_chat_allowed(chat_id_int):
-        return False, f"Chat {chat_id_int} is not in the allowlist"
+        if not is_chat_allowed(chat_id_int):
+            return False, f"Chat {chat_id_int} is not in the allowlist"
 
     return True, ""
 
