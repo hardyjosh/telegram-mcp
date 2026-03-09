@@ -32,10 +32,14 @@ class Permission(StrEnum):
 
     READ = "read"
     WRITE = "write"
+    DRAFTS = "drafts"
 
 
 # Default permissions for newly allowlisted chats
-DEFAULT_PERMISSIONS = {Permission.READ: True, Permission.WRITE: False}
+DEFAULT_PERMISSIONS = {Permission.READ: True, Permission.WRITE: False, Permission.DRAFTS: False}
+
+# Tools that should be gated by the DRAFTS permission (not auto-detected from annotations)
+DRAFT_TOOLS = {"save_draft", "get_drafts", "clear_draft"}
 
 # Map tool names to required permissions.
 # Tools not in this map are considered global (no chat-level restriction).
@@ -78,14 +82,12 @@ def init_db() -> None:
             );
         """
         )
-        # Seed default global permissions if empty
-        cursor = conn.execute("SELECT COUNT(*) FROM global_permissions")
-        if cursor.fetchone()[0] == 0:
-            for perm, default in DEFAULT_PERMISSIONS.items():
-                conn.execute(
-                    "INSERT INTO global_permissions (permission, enabled) VALUES (?, ?)",
-                    (perm.value, int(default)),
-                )
+        # Seed default global permissions (insert any missing)
+        for perm, default in DEFAULT_PERMISSIONS.items():
+            conn.execute(
+                "INSERT OR IGNORE INTO global_permissions (permission, enabled) VALUES (?, ?)",
+                (perm.value, int(default)),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -253,7 +255,10 @@ def build_tool_permission_map(tools_with_annotations: list[dict]) -> None:
 
         # Only map tools that have chat-level scope
         # (we'll check if they take chat_id at enforcement time)
-        if annotations.get("readOnlyHint"):
+        # Draft tools get their own permission category
+        if name in DRAFT_TOOLS:
+            TOOL_PERMISSION_MAP[name] = Permission.DRAFTS
+        elif annotations.get("readOnlyHint"):
             TOOL_PERMISSION_MAP[name] = Permission.READ
         elif annotations.get("destructiveHint"):
             TOOL_PERMISSION_MAP[name] = Permission.WRITE
