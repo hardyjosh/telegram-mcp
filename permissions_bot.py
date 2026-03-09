@@ -70,6 +70,7 @@ async def get_user_chats(force_refresh: bool = False) -> list[dict]:
         title = getattr(entity, "title", None) or getattr(entity, "first_name", "Unknown")
         chats.append({"chat_id": chat_id, "title": title})
     _chat_cache = chats
+    print(f"Chat cache loaded: {len(chats)} chats")
     return chats
 
 
@@ -188,11 +189,17 @@ async def chats_page_handler(event):
 
     page = int(event.pattern_match.group(1).decode())
     keyboard = await build_chats_keyboard(page)
-    await event.edit(
-        "**Select chats to allow access:**\n\n"
-        "\u2705 = allowed, \u2b1c = not allowed",
-        buttons=keyboard,
-    )
+    user_chats = await get_user_chats()
+    total = len(user_chats)
+    total_pages = max(1, math.ceil(total / CHATS_PER_PAGE))
+    try:
+        await event.edit(
+            f"**Select chats to allow access:** ({total} chats)\n\n"
+            "\u2705 = allowed, \u2b1c = not allowed",
+            buttons=keyboard,
+        )
+    except Exception as e:
+        print(f"Error editing page {page}/{total_pages} ({total} chats): {e}")
 
 
 @bot.on(events.CallbackQuery(pattern=rb"chat:(-?\d+):(\d+)"))
