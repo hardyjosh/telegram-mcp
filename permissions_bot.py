@@ -62,7 +62,7 @@ async def get_user_chats(force_refresh: bool = False) -> list[dict]:
     global _chat_cache
     if not force_refresh and _chat_cache:
         return _chat_cache
-    dialogs = await user_client.get_dialogs()
+    dialogs = await user_client.get_dialogs(limit=None)
     chats = []
     for dialog in dialogs:
         entity = dialog.entity
