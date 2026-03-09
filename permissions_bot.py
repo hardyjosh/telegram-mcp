@@ -17,6 +17,7 @@ import asyncio
 import math
 import os
 import sys
+import time
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events, Button
@@ -37,6 +38,11 @@ SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
 TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 
 CHATS_PER_PAGE = 8
+CHAT_CACHE_TTL = 300  # 5 minutes
+
+# Cached chat list
+_chat_cache: list[dict] = []
+_chat_cache_time: float = 0
 
 # Bot client (uses bot token)
 bot = TelegramClient("permissions_bot", TELEGRAM_API_ID, TELEGRAM_API_HASH)
@@ -55,8 +61,11 @@ def is_owner(event) -> bool:
     return event.sender_id == OWNER_ID
 
 
-async def get_user_chats() -> list[dict]:
-    """Fetch the user's chat list via their Telethon session."""
+async def get_user_chats(force_refresh: bool = False) -> list[dict]:
+    """Fetch the user's chat list via their Telethon session (cached)."""
+    global _chat_cache, _chat_cache_time
+    if not force_refresh and _chat_cache and (time.time() - _chat_cache_time) < CHAT_CACHE_TTL:
+        return _chat_cache
     dialogs = await user_client.get_dialogs()
     chats = []
     for dialog in dialogs:
@@ -64,6 +73,8 @@ async def get_user_chats() -> list[dict]:
         chat_id = entity.id
         title = getattr(entity, "title", None) or getattr(entity, "first_name", "Unknown")
         chats.append({"chat_id": chat_id, "title": title})
+    _chat_cache = chats
+    _chat_cache_time = time.time()
     return chats
 
 
@@ -142,6 +153,7 @@ async def home_handler(event):
     """Return to the main permissions menu."""
     if not is_owner(event):
         return
+    await event.answer()
 
     keyboard = build_permissions_keyboard()
     await event.edit(
@@ -156,6 +168,7 @@ async def toggle_permission_handler(event):
     """Toggle a global permission."""
     if not is_owner(event):
         return
+    await event.answer()
 
     perm_name = event.pattern_match.group(1).decode()
     new_state = permissions.toggle_global_permission(perm_name)
@@ -173,6 +186,7 @@ async def chats_page_handler(event):
     """Show a page of chats."""
     if not is_owner(event):
         return
+    await event.answer()
 
     page = int(event.pattern_match.group(1).decode())
     keyboard = await build_chats_keyboard(page)
@@ -188,6 +202,7 @@ async def toggle_chat_handler(event):
     """Toggle a chat's allowlist status."""
     if not is_owner(event):
         return
+    await event.answer()
 
     chat_id = int(event.pattern_match.group(1).decode())
     page = int(event.pattern_match.group(2).decode())
