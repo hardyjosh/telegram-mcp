@@ -323,6 +323,23 @@ async def info_page(request: Request) -> HTMLResponse:
 @asynccontextmanager
 async def lifespan(app):
     """Lifespan context manager to start/stop Telegram client with uvicorn's event loop."""
+    # Initialise permissions
+    import permissions as perms
+    perms.init_db()
+
+    # Build permission map from registered tool annotations
+    tools_info = []
+    for tool_name, tool in mcp._tool_manager._tools.items():
+        annotations = {}
+        if hasattr(tool, 'tool') and hasattr(tool.tool, 'annotations') and tool.tool.annotations:
+            annotations = {
+                "readOnlyHint": getattr(tool.tool.annotations, "readOnlyHint", False),
+                "destructiveHint": getattr(tool.tool.annotations, "destructiveHint", False),
+            }
+        tools_info.append({"name": tool_name, "annotations": annotations})
+    perms.build_tool_permission_map(tools_info)
+    print(f"Permission map built: {len(tools_info)} tools mapped")
+
     print("Starting Telegram client...")
     await client.start()
     print("Telegram client connected.")
