@@ -387,11 +387,10 @@ async def get_chats(page: int = 1, page_size: int = 20) -> str:
     try:
         dialogs = await client.get_dialogs()
 
-        # Filter to allowlisted chats if permissions are configured
+        # Filter to allowlisted chats only
         allowlisted = perms.get_allowlisted_chats()
-        if allowlisted:
-            allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
-            dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
+        allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
+        dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
 
         start = (page - 1) * page_size
         end = start + page_size
@@ -975,11 +974,10 @@ async def list_chats(chat_type: str = None, limit: int = 20) -> str:
     try:
         dialogs = await client.get_dialogs(limit=limit)
 
-        # Filter to allowlisted chats if permissions are configured
+        # Filter to allowlisted chats only
         allowlisted = perms.get_allowlisted_chats()
-        if allowlisted:
-            allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
-            dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
+        allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
+        dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
 
         results = []
         for dialog in dialogs:
