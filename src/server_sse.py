@@ -339,7 +339,20 @@ async def lifespan(app):
         tools_info.append({"name": tool_name, "annotations": annotations})
     perms.build_tool_permission_map(tools_info)
     write_tools = [t["name"] for t in tools_info if t["annotations"].get("destructiveHint")]
-    print(f"Permission map built: {len(tools_info)} tools, {len(write_tools)} write-gated: {write_tools[:5]}...")
+    print(f"Permission map built: {len(perms.TOOL_PERMISSION_MAP)} tools mapped")
+
+    # Patch tool_manager.call_tool to enforce permissions on ALL tool calls
+    _original_call_tool = mcp._tool_manager.call_tool
+
+    async def _checked_call_tool(name, arguments, **kwargs):
+        chat_id = arguments.get("chat_id") or arguments.get("group_id")
+        allowed, reason = perms.check_permission(name, chat_id)
+        if not allowed:
+            from mcp.types import TextContent
+            return [TextContent(type="text", text=f"Permission denied: {reason}")]
+        return await _original_call_tool(name, arguments, **kwargs)
+
+    mcp._tool_manager.call_tool = _checked_call_tool
 
     print("Starting Telegram client...")
     await client.start()
