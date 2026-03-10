@@ -1,8 +1,10 @@
-"""Telegram bot for managing MCP server chat permissions.
+"""Telegram bot for managing MCP server chat permissions and authentication.
 
 Provides an inline keyboard interface for:
 1. Toggling global permissions (read/write)
 2. Browsing and toggling chat allowlist
+3. Generating MCP bearer tokens (/generate-key)
+4. Interactive Telegram auth flow (/auth)
 
 The bot runs alongside the MCP server and shares the same permissions database.
 It uses a separate bot token (not the user's Telethon session).
@@ -23,6 +25,7 @@ from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 
 import permissions
+import auth_manager
 
 load_dotenv()
 
@@ -255,6 +258,301 @@ async def noop_handler(event):
     await event.answer()
 
 
+# ============================================================================
+# KEY GENERATION
+# ============================================================================
+
+
+@bot.on(events.NewMessage(pattern="/generate_key"))
+async def generate_key_handler(event):
+    """Generate a new MCP bearer token."""
+    if not is_owner(event):
+        return
+
+    token = auth_manager.generate_token(label="bot-generated")
+
+    # Send in a way that's easy to copy but auto-deletes
+    msg = await event.respond(
+        "**New MCP Bearer Token Generated**\n\n"
+        f"`{token}`\n\n"
+        "Copy this now — it won't be shown again.\n"
+        "Use it as the Bearer token in your MCP client config.\n\n"
+        "_This message will auto-delete in 60 seconds._",
+        buttons=[Button.inline("🗑 Delete Now", data="delete_token_msg")],
+    )
+
+    # Auto-delete after 60 seconds
+    await asyncio.sleep(60)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+
+@bot.on(events.NewMessage(pattern="/revoke_keys"))
+async def revoke_keys_handler(event):
+    """Revoke all active MCP bearer tokens."""
+    if not is_owner(event):
+        return
+
+    await event.respond(
+        "**⚠️ Revoke all MCP tokens?**\n\n"
+        "This will invalidate ALL active bearer tokens. "
+        "Any connected MCP clients will lose access immediately.\n\n"
+        "You'll need to run /generate\\_key to create a new one.",
+        buttons=[
+            [Button.inline("✅ Yes, revoke all", data="confirm_revoke")],
+            [Button.inline("❌ Cancel", data="cancel_revoke")],
+        ],
+    )
+
+
+@bot.on(events.CallbackQuery(pattern=b"confirm_revoke"))
+async def confirm_revoke_handler(event):
+    if not is_owner(event):
+        return
+    await event.answer()
+    count = auth_manager.revoke_all_tokens()
+    await event.edit(f"**Done.** Revoked {count} token(s).\n\nRun /generate\\_key to create a new one.")
+
+
+@bot.on(events.CallbackQuery(pattern=b"cancel_revoke"))
+async def cancel_revoke_handler(event):
+    if not is_owner(event):
+        return
+    await event.answer()
+    await event.edit("Cancelled. Tokens remain active.")
+
+
+@bot.on(events.CallbackQuery(pattern=b"delete_token_msg"))
+async def delete_token_msg_handler(event):
+    if not is_owner(event):
+        return
+    await event.answer()
+    await event.delete()
+
+
+@bot.on(events.NewMessage(pattern="/list_keys"))
+async def list_keys_handler(event):
+    """List all MCP tokens (metadata only)."""
+    if not is_owner(event):
+        return
+
+    tokens = auth_manager.list_tokens()
+    if not tokens:
+        await event.respond("No tokens found. Run /generate\\_key to create one.")
+        return
+
+    lines = ["**MCP Tokens:**\n"]
+    for t in tokens:
+        status = "🔴 revoked" if t["revoked"] else "🟢 active"
+        last_used = t["last_used_at"] or "never"
+        lines.append(
+            f"• #{t['id']} ({status}) — created {t['created_at']}, last used {last_used}"
+        )
+
+    await event.respond("\n".join(lines))
+
+
+# ============================================================================
+# TELEGRAM AUTH FLOW
+# ============================================================================
+
+# Temporary client used during auth flow
+_auth_client: TelegramClient | None = None
+
+
+@bot.on(events.NewMessage(pattern="/auth"))
+async def auth_handler(event):
+    """Start the Telegram authentication flow."""
+    if not is_owner(event):
+        return
+
+    # Check if already authenticated
+    if SESSION_STRING or TELEGRAM_SESSION_NAME:
+        await event.respond(
+            "**Already authenticated.**\n\n"
+            "A Telegram session is already configured via environment variables.\n"
+            "To re-authenticate, remove TELEGRAM_SESSION_STRING from your Fly secrets first.",
+        )
+        return
+
+    auth_manager.set_auth_state(event.sender_id, "awaiting_phone")
+    await event.respond(
+        "**Telegram Authentication**\n\n"
+        "Send me your phone number (with country code, e.g. `+44...`).\n\n"
+        "Telegram will send a verification code to your Telegram app.\n\n"
+        "Type /cancel to abort.",
+    )
+
+
+@bot.on(events.NewMessage(pattern="/cancel"))
+async def cancel_auth_handler(event):
+    if not is_owner(event):
+        return
+    global _auth_client
+    state = auth_manager.get_auth_state(event.sender_id)
+    if state:
+        auth_manager.clear_auth_state(event.sender_id)
+        if _auth_client:
+            try:
+                await _auth_client.disconnect()
+            except Exception:
+                pass
+            _auth_client = None
+        await event.respond("Authentication cancelled.")
+    else:
+        await event.respond("Nothing to cancel.")
+
+
+@bot.on(events.NewMessage())
+async def auth_conversation_handler(event):
+    """Handle auth conversation flow (phone number, code, 2FA)."""
+    if not is_owner(event):
+        return
+
+    # Don't process commands
+    if event.text and event.text.startswith("/"):
+        return
+
+    state = auth_manager.get_auth_state(event.sender_id)
+    if not state:
+        return
+
+    global _auth_client
+
+    if state["step"] == "awaiting_phone":
+        phone = event.text.strip()
+        if not phone.startswith("+"):
+            await event.respond("Please include the country code (e.g. `+447901...`).")
+            return
+
+        try:
+            _auth_client = TelegramClient(
+                StringSession(), TELEGRAM_API_ID, TELEGRAM_API_HASH
+            )
+            await _auth_client.connect()
+            result = await _auth_client.send_code_request(phone)
+            auth_manager.set_auth_state(
+                event.sender_id, "awaiting_code", phone=phone,
+                phone_code_hash=result.phone_code_hash,
+            )
+            await event.respond(
+                "**Code sent!** Check your Telegram app.\n\n"
+                "Send me the verification code.\n\n"
+                "⚠️ **Important:** Send the digits with spaces or dashes "
+                "(e.g. `1 2 3 4 5`) so Telegram doesn't intercept it.",
+            )
+        except Exception as e:
+            auth_manager.clear_auth_state(event.sender_id)
+            if _auth_client:
+                await _auth_client.disconnect()
+                _auth_client = None
+            await event.respond(f"**Error sending code:** `{e}`\n\nTry /auth again.")
+
+    elif state["step"] == "awaiting_code":
+        # Strip spaces, dashes from code
+        code = event.text.strip().replace(" ", "").replace("-", "")
+
+        # Delete the message containing the code for security
+        try:
+            await event.delete()
+        except Exception:
+            pass
+
+        try:
+            await _auth_client.sign_in(
+                phone=state["phone"],
+                code=code,
+                phone_code_hash=state["phone_code_hash"],
+            )
+
+            # Success — extract session string
+            session_string = StringSession.save(_auth_client.session)
+            auth_manager.clear_auth_state(event.sender_id)
+
+            # Send session string (auto-delete)
+            msg = await event.respond(
+                "**Authentication successful!** ✅\n\n"
+                "Your session string:\n"
+                f"`{session_string}`\n\n"
+                "Set this as `TELEGRAM_SESSION_STRING` in your Fly secrets:\n"
+                "```\nfly secrets set TELEGRAM_SESSION_STRING=\"...\" -a telegram-mcp-jks\n```\n\n"
+                "_This message will auto-delete in 120 seconds._",
+                buttons=[Button.inline("🗑 Delete Now", data="delete_token_msg")],
+            )
+
+            await _auth_client.disconnect()
+            _auth_client = None
+
+            await asyncio.sleep(120)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+        except Exception as e:
+            error_str = str(e).lower()
+            if "password" in error_str or "2fa" in error_str or "srp" in error_str:
+                auth_manager.set_auth_state(
+                    event.sender_id, "awaiting_2fa",
+                    phone=state["phone"],
+                    phone_code_hash=state["phone_code_hash"],
+                )
+                await event.respond(
+                    "**2FA password required.**\n\n"
+                    "Send me your two-factor authentication password.\n\n"
+                    "⚠️ The message will be deleted immediately for security.",
+                )
+            else:
+                auth_manager.clear_auth_state(event.sender_id)
+                if _auth_client:
+                    await _auth_client.disconnect()
+                    _auth_client = None
+                await event.respond(f"**Sign-in failed:** `{e}`\n\nTry /auth again.")
+
+    elif state["step"] == "awaiting_2fa":
+        password = event.text.strip()
+
+        # Delete the password message immediately
+        try:
+            await event.delete()
+        except Exception:
+            pass
+
+        try:
+            await _auth_client.sign_in(password=password)
+
+            session_string = StringSession.save(_auth_client.session)
+            auth_manager.clear_auth_state(event.sender_id)
+
+            msg = await event.respond(
+                "**Authentication successful!** ✅\n\n"
+                "Your session string:\n"
+                f"`{session_string}`\n\n"
+                "Set this as `TELEGRAM_SESSION_STRING` in your Fly secrets:\n"
+                "```\nfly secrets set TELEGRAM_SESSION_STRING=\"...\" -a telegram-mcp-jks\n```\n\n"
+                "_This message will auto-delete in 120 seconds._",
+                buttons=[Button.inline("🗑 Delete Now", data="delete_token_msg")],
+            )
+
+            await _auth_client.disconnect()
+            _auth_client = None
+
+            await asyncio.sleep(120)
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+
+        except Exception as e:
+            auth_manager.clear_auth_state(event.sender_id)
+            if _auth_client:
+                await _auth_client.disconnect()
+                _auth_client = None
+            await event.respond(f"**2FA sign-in failed:** `{e}`\n\nTry /auth again.")
+
+
 async def main():
     """Start both bot and user clients."""
     if not BOT_TOKEN:
@@ -265,8 +563,9 @@ async def main():
         print("Error: PERMISSIONS_BOT_OWNER_ID not set", file=sys.stderr)
         sys.exit(1)
 
-    # Initialise permissions database
+    # Initialise databases
     permissions.init_db()
+    auth_manager.init_auth_db()
 
     # Start user client (for fetching chat list)
     await user_client.start()

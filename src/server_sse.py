@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the existing MCP server and Telegram client
 from main import mcp, client
+import auth_manager
 
 # ============================================================================
 # Configuration
@@ -93,8 +94,12 @@ class BearerAuthMiddleware:
 
             token = auth_header[7:]  # Remove "Bearer " prefix
 
-            # Check if token is valid (either from OAuth flow or static BEARER_TOKEN)
-            is_valid = token in VALID_TOKENS or (BEARER_TOKEN and token == BEARER_TOKEN)
+            # Check if token is valid (OAuth flow, static env var, or DB-generated)
+            is_valid = (
+                token in VALID_TOKENS
+                or (BEARER_TOKEN and token == BEARER_TOKEN)
+                or auth_manager.validate_token(token)
+            )
 
             if not is_valid:
                 response = JSONResponse({"error": "Invalid token"}, status_code=401)
@@ -323,9 +328,10 @@ async def info_page(request: Request) -> HTMLResponse:
 @asynccontextmanager
 async def lifespan(app):
     """Lifespan context manager to start/stop Telegram client with uvicorn's event loop."""
-    # Initialise permissions
+    # Initialise permissions and auth
     import permissions as perms
     perms.init_db()
+    auth_manager.init_auth_db()
 
     # Build permission map from registered tool annotations
     tools_info = []
