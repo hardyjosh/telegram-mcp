@@ -279,7 +279,11 @@ async def generate_key_handler(event):
     if not is_owner(event):
         return
 
-    token = auth_manager.generate_token(label="bot-generated")
+    try:
+        token = auth_manager.generate_token(label="bot-generated")
+    except RuntimeError as e:
+        await event.respond(f"**Error:** {e}")
+        return
 
     # Send in a way that's easy to copy but auto-deletes
     msg = await event.respond(
@@ -437,6 +441,12 @@ async def auth_conversation_handler(event):
             await event.respond("Please include the country code (e.g. `+447901...`).")
             return
 
+        # Try to delete the phone number message
+        try:
+            await event.delete()
+        except Exception:
+            await event.respond("⚠️ Please delete your phone number message manually for security.")
+
         try:
             _auth_client = TelegramClient(
                 StringSession(), TELEGRAM_API_ID, TELEGRAM_API_HASH
@@ -451,7 +461,8 @@ async def auth_conversation_handler(event):
                 "**Code sent!** Check your Telegram app.\n\n"
                 "Send me the verification code.\n\n"
                 "⚠️ **Important:** Send the digits with spaces or dashes "
-                "(e.g. `1 2 3 4 5`) so Telegram doesn't intercept it.",
+                "(e.g. `1 2 3 4 5`) so Telegram doesn't intercept it.\n\n"
+                "⏱ This auth session expires in 5 minutes.",
             )
         except Exception as e:
             auth_manager.clear_auth_state(event.sender_id)
@@ -464,11 +475,12 @@ async def auth_conversation_handler(event):
         # Strip spaces, dashes from code
         code = event.text.strip().replace(" ", "").replace("-", "")
 
-        # Delete the message containing the code for security
+        # Try to delete the message containing the code
+        # Note: bots can't always delete user messages in DMs
         try:
             await event.delete()
         except Exception:
-            pass
+            await event.respond("⚠️ Please delete your code message manually for security.")
 
         try:
             await _auth_client.sign_in(
@@ -513,11 +525,11 @@ async def auth_conversation_handler(event):
     elif state["step"] == "awaiting_2fa":
         password = event.text.strip()
 
-        # Delete the password message immediately
+        # Try to delete the password message
         try:
             await event.delete()
         except Exception:
-            pass
+            await event.respond("⚠️ Please delete your password message manually for security.")
 
         try:
             await _auth_client.sign_in(password=password)

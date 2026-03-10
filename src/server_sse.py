@@ -47,7 +47,8 @@ OAUTH_CLIENT_SECRET = os.environ.get("OAUTH_CLIENT_SECRET")
 # Authentication Middleware
 # ============================================================================
 
-# Global set to store valid OAuth tokens
+# OAuth tokens — bounded LRU-style set (max 100 tokens in memory)
+_MAX_OAUTH_TOKENS = 100
 VALID_TOKENS: set = set()
 
 
@@ -253,6 +254,9 @@ async def token_endpoint(request: Request) -> JSONResponse:
     global VALID_TOKENS
     if "VALID_TOKENS" not in globals():
         VALID_TOKENS = set()
+    # Evict oldest tokens if at capacity
+    if len(VALID_TOKENS) >= _MAX_OAUTH_TOKENS:
+        VALID_TOKENS.clear()
     VALID_TOKENS.add(access_token)
 
     return JSONResponse(

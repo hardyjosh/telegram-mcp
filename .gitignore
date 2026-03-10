@@ -201,4 +201,7 @@ test_issues_report.md
 test_upload.txt
 test_voice.ogg
 sticker.webp
-two.pngpermissions.db
+two.png
+permissions.db
+permissions.db-wal
+permissions.db-shm
