@@ -110,6 +110,7 @@ async def build_chats_keyboard(page: int = 0) -> list[list[Button]]:
             icon = "\u2b1c"
 
         # Truncate long titles
+        title = title or "Untitled"
         display_title = title[:30] + "..." if len(title) > 30 else title
         buttons.append(
             [Button.inline(f"{icon} {display_title}", data=f"chat:{chat_id}:{page}")]
