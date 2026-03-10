@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY main.py .
 COPY permissions.py .
 COPY permissions_bot.py .
+COPY auth_manager.py .
 COPY entrypoint.sh .
 COPY src/ ./src/
 
