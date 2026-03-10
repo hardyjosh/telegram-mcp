@@ -51,6 +51,13 @@ def init_auth_db() -> None:
                 phone_code_hash TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS telegram_session (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                session_string TEXT NOT NULL,
+                owner_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
         conn.commit()
     finally:
@@ -173,5 +180,32 @@ def clear_auth_state(user_id: int) -> None:
     try:
         conn.execute("DELETE FROM auth_state WHERE user_id = ?", (user_id,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+# --- Session string storage ---
+
+def store_session(session_string: str, owner_id: int = None) -> None:
+    """Store the Telegram session string in the DB (replaces any existing)."""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """INSERT OR REPLACE INTO telegram_session (id, session_string, owner_id, created_at)
+               VALUES (1, ?, ?, datetime('now'))""",
+            (session_string, owner_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_session() -> Optional[str]:
+    """Retrieve the stored session string, or None."""
+    conn = _get_conn()
+    try:
+        cursor = conn.execute("SELECT session_string FROM telegram_session WHERE id = 1")
+        row = cursor.fetchone()
+        return row[0] if row else None
     finally:
         conn.close()

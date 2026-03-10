@@ -39,6 +39,16 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
 TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 
+# Fall back to DB-stored session
+if not SESSION_STRING:
+    try:
+        auth_manager.init_auth_db()
+        SESSION_STRING = auth_manager.get_session()
+        if SESSION_STRING:
+            print("Permissions bot: using session string from database")
+    except Exception:
+        pass
+
 CHATS_PER_PAGE = 8
 # Cached chat list (fetched once on /start, refreshed on demand)
 _chat_cache: list[dict] = []
@@ -368,12 +378,12 @@ async def auth_handler(event):
     if not is_owner(event):
         return
 
-    # Check if already authenticated
-    if SESSION_STRING or TELEGRAM_SESSION_NAME:
+    # Check if already authenticated via env var (DB sessions can be overwritten)
+    if os.getenv("TELEGRAM_SESSION_STRING"):
         await event.respond(
-            "**Already authenticated.**\n\n"
-            "A Telegram session is already configured via environment variables.\n"
-            "To re-authenticate, remove TELEGRAM_SESSION_STRING from your Fly secrets first.",
+            "**Already authenticated via environment variable.**\n\n"
+            "A Telegram session is set in TELEGRAM_SESSION_STRING.\n"
+            "Remove it from your Fly secrets first to use bot-managed auth.",
         )
         return
 
@@ -467,29 +477,18 @@ async def auth_conversation_handler(event):
                 phone_code_hash=state["phone_code_hash"],
             )
 
-            # Success — extract session string
+            # Success — store session string internally
             session_string = StringSession.save(_auth_client.session)
+            auth_manager.store_session(session_string, owner_id=event.sender_id)
             auth_manager.clear_auth_state(event.sender_id)
-
-            # Send session string (auto-delete)
-            msg = await event.respond(
-                "**Authentication successful!** ✅\n\n"
-                "Your session string:\n"
-                f"`{session_string}`\n\n"
-                "Set this as `TELEGRAM_SESSION_STRING` in your Fly secrets:\n"
-                "```\nfly secrets set TELEGRAM_SESSION_STRING=\"...\" -a telegram-mcp-jks\n```\n\n"
-                "_This message will auto-delete in 120 seconds._",
-                buttons=[Button.inline("🗑 Delete Now", data="delete_token_msg")],
-            )
 
             await _auth_client.disconnect()
             _auth_client = None
 
-            await asyncio.sleep(120)
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+            await event.respond(
+                "**Authentication successful!** ✅\n\n"
+                "Session stored securely. Restart the MCP server to use it.",
+            )
 
         except Exception as e:
             error_str = str(e).lower()
@@ -524,26 +523,16 @@ async def auth_conversation_handler(event):
             await _auth_client.sign_in(password=password)
 
             session_string = StringSession.save(_auth_client.session)
+            auth_manager.store_session(session_string, owner_id=event.sender_id)
             auth_manager.clear_auth_state(event.sender_id)
-
-            msg = await event.respond(
-                "**Authentication successful!** ✅\n\n"
-                "Your session string:\n"
-                f"`{session_string}`\n\n"
-                "Set this as `TELEGRAM_SESSION_STRING` in your Fly secrets:\n"
-                "```\nfly secrets set TELEGRAM_SESSION_STRING=\"...\" -a telegram-mcp-jks\n```\n\n"
-                "_This message will auto-delete in 120 seconds._",
-                buttons=[Button.inline("🗑 Delete Now", data="delete_token_msg")],
-            )
 
             await _auth_client.disconnect()
             _auth_client = None
 
-            await asyncio.sleep(120)
-            try:
-                await msg.delete()
-            except Exception:
-                pass
+            await event.respond(
+                "**Authentication successful!** ✅\n\n"
+                "Session stored securely. Restart the MCP server to use it.",
+            )
 
         except Exception as e:
             auth_manager.clear_auth_state(event.sender_id)

@@ -43,6 +43,7 @@ from functools import wraps
 import telethon.errors.rpcerrorlist
 
 import permissions as perms
+import auth_manager
 
 
 class ValidationError(Exception):
@@ -69,6 +70,16 @@ TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 
 # Check if a string session exists in environment, otherwise use file-based session
 SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
+
+# Fall back to DB-stored session if no env var
+if not SESSION_STRING:
+    try:
+        auth_manager.init_auth_db()
+        SESSION_STRING = auth_manager.get_session()
+        if SESSION_STRING:
+            print("Using session string from database")
+    except Exception:
+        pass
 
 mcp = FastMCP("telegram")
 
