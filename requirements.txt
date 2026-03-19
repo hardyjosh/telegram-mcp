@@ -5,4 +5,5 @@ mcp[cli]==1.22.0
 nest-asyncio==1.6.0
 python-dotenv==1.1.0
 python-json-logger==4.0.0
-telethon==1.39.0 cryptography>=42.0.0
+telethon==1.39.0
+cryptography>=42.0.0
