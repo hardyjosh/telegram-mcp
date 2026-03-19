@@ -404,14 +404,12 @@ def create_app_with_lifespan() -> Starlette:
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
-    # Only require auth if OAuth credentials are configured
-    # Protect MCP endpoints but NOT OAuth/health endpoints
-    if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
-        app = BearerAuthMiddleware(
-            app,
-            protected_paths=["/sse", "/messages", "/mcp"],
-            # Note: Root "/" is also MCP but handled by exclude logic below
-        )
+    # Always apply auth middleware — it checks DB tokens, static bearer token,
+    # and OAuth tokens. Without this, MCP endpoints are completely open.
+    app = BearerAuthMiddleware(
+        app,
+        protected_paths=["/sse", "/messages", "/mcp"],
+    )
 
     return app
 
