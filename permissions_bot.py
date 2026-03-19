@@ -61,8 +61,11 @@ if SESSION_STRING:
     user_client = TelegramClient(
         StringSession(SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH
     )
-else:
+elif TELEGRAM_SESSION_NAME:
     user_client = TelegramClient(TELEGRAM_SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+else:
+    user_client = None
+    print("Permissions bot: no user session — /start and chat management won't work until /auth")
 
 
 def is_owner(event) -> bool:
@@ -73,6 +76,8 @@ def is_owner(event) -> bool:
 async def get_user_chats(force_refresh: bool = False) -> list[dict]:
     """Fetch the user's chat list via their Telethon session (cached)."""
     global _chat_cache
+    if not user_client:
+        return []
     if not force_refresh and _chat_cache:
         return _chat_cache
     dialogs = await user_client.get_dialogs(limit=None)
@@ -568,8 +573,11 @@ async def main():
     permissions.init_db()
     auth_manager.init_auth_db()
 
-    # Start user client (for fetching chat list)
-    await user_client.start()
+    # Start user client (for fetching chat list) — optional
+    if user_client:
+        await user_client.start()
+    else:
+        print("No user session — bot running in auth-only mode")
 
     # Start bot client
     await bot.start(bot_token=BOT_TOKEN)

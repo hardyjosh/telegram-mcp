@@ -119,7 +119,7 @@ async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint for load balancers and monitoring."""
     # Check if Telegram client is connected
     try:
-        connected = client.is_connected()
+        connected = client.is_connected() if client else False
     except Exception:
         connected = False
 
@@ -364,14 +364,19 @@ async def lifespan(app):
 
     mcp._tool_manager.call_tool = _checked_call_tool
 
-    print("Starting Telegram client...")
-    await client.start()
-    print("Telegram client connected.")
+    if client:
+        print("Starting Telegram client...")
+        await client.start()
+        print("Telegram client connected.")
+    else:
+        print("WARNING: No Telegram session — running in degraded mode.")
+        print("Use /auth in the permissions bot to authenticate.")
     yield
     # Cleanup on shutdown
-    print("Disconnecting Telegram client...")
-    await client.disconnect()
-    print("Telegram client disconnected.")
+    if client and client.is_connected():
+        print("Disconnecting Telegram client...")
+        await client.disconnect()
+        print("Telegram client disconnected.")
 
 
 def create_app_with_lifespan() -> Starlette:

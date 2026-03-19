@@ -86,9 +86,14 @@ mcp = FastMCP("telegram")
 if SESSION_STRING:
     # Use the string session if available
     client = TelegramClient(StringSession(SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
-else:
+elif TELEGRAM_SESSION_NAME:
     # Use file-based session
     client = TelegramClient(TELEGRAM_SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+else:
+    # No session available — client will be None (degraded mode)
+    client = None
+    print("WARNING: No Telegram session configured. MCP tools will not work.")
+    print("Use /auth in the permissions bot to authenticate.")
 
 # Setup robust logging with both file and console output
 logger = logging.getLogger("telegram_mcp")
