@@ -390,7 +390,7 @@ _auth_client: TelegramClient | None = None
 
 @bot.on(events.NewMessage(pattern="/auth"))
 async def auth_handler(event):
-    """Start the Telegram authentication flow."""
+    """Start the Telegram authentication flow via QR code."""
     if not is_owner(event):
         return
 
@@ -403,13 +403,94 @@ async def auth_handler(event):
         )
         return
 
-    auth_manager.set_auth_state(event.sender_id, "awaiting_phone")
-    await event.respond(
-        "**Telegram Authentication**\n\n"
-        "Send me your phone number (with country code, e.g. `+44...`).\n\n"
-        "Telegram will send a verification code to your Telegram app.\n\n"
-        "Type /cancel to abort.",
-    )
+    global _auth_client
+
+    try:
+        _auth_client = TelegramClient(
+            StringSession(), TELEGRAM_API_ID, TELEGRAM_API_HASH
+        )
+        await _auth_client.connect()
+
+        qr_login = await _auth_client.qr_login()
+
+        # Generate QR code image
+        import qrcode
+        import io
+
+        qr = qrcode.QRCode(version=1, box_size=10, border=4)
+        qr.add_data(qr_login.url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+
+        await event.respond(
+            "**Scan this QR code with Telegram on your phone:**\n\n"
+            "Open Telegram → Settings → Devices → Link Desktop Device\n\n"
+            "⏱ QR code expires in 30 seconds. Type /cancel to abort.",
+            file=buf,
+        )
+
+        # Wait for scan (with retries for QR expiry)
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                await qr_login.wait(30)
+                break  # Success
+            except asyncio.TimeoutError:
+                if attempt < max_attempts - 1:
+                    # Recreate QR code
+                    await qr_login.recreate()
+                    qr2 = qrcode.QRCode(version=1, box_size=10, border=4)
+                    qr2.add_data(qr_login.url)
+                    qr2.make(fit=True)
+                    img2 = qr2.make_image(fill_color="black", back_color="white")
+                    buf2 = io.BytesIO()
+                    img2.save(buf2, format="PNG")
+                    buf2.seek(0)
+                    await event.respond(
+                        f"**QR code expired.** Here's a new one (attempt {attempt + 2}/{max_attempts}):",
+                        file=buf2,
+                    )
+                else:
+                    await event.respond("**Timed out.** Run /auth to try again.")
+                    await _auth_client.disconnect()
+                    _auth_client = None
+                    return
+
+        # Success — store session
+        session_string = StringSession.save(_auth_client.session)
+        auth_manager.store_session(session_string, owner_id=event.sender_id)
+
+        await _auth_client.disconnect()
+        _auth_client = None
+
+        await event.respond(
+            "**Authentication successful!** ✅\n\n"
+            "Session stored securely. Restart the MCP server to use it.\n\n"
+            "Run /start to configure permissions.",
+        )
+
+    except Exception as e:
+        error_str = str(e).lower()
+        if "password" in error_str or "2fa" in error_str or "srp" in error_str:
+            # 2FA required after QR scan — keep the same client alive for sign_in(password=)
+            auth_manager.set_auth_state(event.sender_id, "awaiting_2fa")
+            await event.respond(
+                "**2FA password required.**\n\n"
+                "Send me your two-factor authentication password.\n\n"
+                "⚠️ The message will be deleted immediately for security.",
+            )
+        else:
+            if _auth_client:
+                try:
+                    await _auth_client.disconnect()
+                except Exception:
+                    pass
+                _auth_client = None
+            await event.respond(f"**Auth failed:** `{e}`\n\nTry /auth again.")
 
 
 @bot.on(events.NewMessage(pattern="/cancel"))
@@ -433,7 +514,7 @@ async def cancel_auth_handler(event):
 
 @bot.on(events.NewMessage())
 async def auth_conversation_handler(event):
-    """Handle auth conversation flow (phone number, code, 2FA)."""
+    """Handle 2FA password entry after QR login."""
     if not is_owner(event):
         return
 
@@ -442,128 +523,40 @@ async def auth_conversation_handler(event):
         return
 
     state = auth_manager.get_auth_state(event.sender_id)
-    if not state:
+    if not state or state["step"] != "awaiting_2fa":
         return
 
     global _auth_client
 
-    if state["step"] == "awaiting_phone":
-        phone = event.text.strip()
-        if not phone.startswith("+"):
-            await event.respond("Please include the country code (e.g. `+447901...`).")
-            return
+    password = event.text.strip()
 
-        # Try to delete the phone number message
-        try:
-            await event.delete()
-        except Exception:
-            await event.respond("⚠️ Please delete your phone number message manually for security.")
+    # Try to delete the password message
+    try:
+        await event.delete()
+    except Exception:
+        await event.respond("⚠️ Please delete your password message manually for security.")
 
-        try:
-            _auth_client = TelegramClient(
-                StringSession(), TELEGRAM_API_ID, TELEGRAM_API_HASH
-            )
-            await _auth_client.connect()
-            result = await _auth_client.send_code_request(phone)
-            auth_manager.set_auth_state(
-                event.sender_id, "awaiting_code", phone=phone,
-                phone_code_hash=result.phone_code_hash,
-            )
-            await event.respond(
-                "**Code sent!** Check your Telegram app.\n\n"
-                "Send me the verification code.\n\n"
-                "⚠️ **Important:** Send the digits with spaces or dashes "
-                "(e.g. `1 2 3 4 5`) so Telegram doesn't intercept it.\n\n"
-                "⏱ This auth session expires in 5 minutes.",
-            )
-        except Exception as e:
-            auth_manager.clear_auth_state(event.sender_id)
-            if _auth_client:
-                await _auth_client.disconnect()
-                _auth_client = None
-            await event.respond(f"**Error sending code:** `{e}`\n\nTry /auth again.")
+    try:
+        await _auth_client.sign_in(password=password)
 
-    elif state["step"] == "awaiting_code":
-        # Strip spaces, dashes from code
-        code = event.text.strip().replace(" ", "").replace("-", "")
+        session_string = StringSession.save(_auth_client.session)
+        auth_manager.store_session(session_string, owner_id=event.sender_id)
+        auth_manager.clear_auth_state(event.sender_id)
 
-        # Try to delete the message containing the code
-        # Note: bots can't always delete user messages in DMs
-        try:
-            await event.delete()
-        except Exception:
-            await event.respond("⚠️ Please delete your code message manually for security.")
+        await _auth_client.disconnect()
+        _auth_client = None
 
-        try:
-            await _auth_client.sign_in(
-                phone=state["phone"],
-                code=code,
-                phone_code_hash=state["phone_code_hash"],
-            )
+        await event.respond(
+            "**Authentication successful!** ✅\n\n"
+            "Session stored securely. Restart the MCP server to use it.",
+        )
 
-            # Success — store session string internally
-            session_string = StringSession.save(_auth_client.session)
-            auth_manager.store_session(session_string, owner_id=event.sender_id)
-            auth_manager.clear_auth_state(event.sender_id)
-
+    except Exception as e:
+        auth_manager.clear_auth_state(event.sender_id)
+        if _auth_client:
             await _auth_client.disconnect()
             _auth_client = None
-
-            await event.respond(
-                "**Authentication successful!** ✅\n\n"
-                "Session stored securely. Restart the MCP server to use it.",
-            )
-
-        except Exception as e:
-            error_str = str(e).lower()
-            if "password" in error_str or "2fa" in error_str or "srp" in error_str:
-                auth_manager.set_auth_state(
-                    event.sender_id, "awaiting_2fa",
-                    phone=state["phone"],
-                    phone_code_hash=state["phone_code_hash"],
-                )
-                await event.respond(
-                    "**2FA password required.**\n\n"
-                    "Send me your two-factor authentication password.\n\n"
-                    "⚠️ The message will be deleted immediately for security.",
-                )
-            else:
-                auth_manager.clear_auth_state(event.sender_id)
-                if _auth_client:
-                    await _auth_client.disconnect()
-                    _auth_client = None
-                await event.respond(f"**Sign-in failed:** `{e}`\n\nTry /auth again.")
-
-    elif state["step"] == "awaiting_2fa":
-        password = event.text.strip()
-
-        # Try to delete the password message
-        try:
-            await event.delete()
-        except Exception:
-            await event.respond("⚠️ Please delete your password message manually for security.")
-
-        try:
-            await _auth_client.sign_in(password=password)
-
-            session_string = StringSession.save(_auth_client.session)
-            auth_manager.store_session(session_string, owner_id=event.sender_id)
-            auth_manager.clear_auth_state(event.sender_id)
-
-            await _auth_client.disconnect()
-            _auth_client = None
-
-            await event.respond(
-                "**Authentication successful!** ✅\n\n"
-                "Session stored securely. Restart the MCP server to use it.",
-            )
-
-        except Exception as e:
-            auth_manager.clear_auth_state(event.sender_id)
-            if _auth_client:
-                await _auth_client.disconnect()
-                _auth_client = None
-            await event.respond(f"**2FA sign-in failed:** `{e}`\n\nTry /auth again.")
+        await event.respond(f"**2FA sign-in failed:** `{e}`\n\nTry /auth again.")
 
 
 async def main():

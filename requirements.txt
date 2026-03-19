@@ -7,3 +7,4 @@ python-dotenv==1.1.0
 python-json-logger==4.0.0
 telethon==1.39.0
 cryptography>=42.0.0
+qrcode[pil]>=7.4
