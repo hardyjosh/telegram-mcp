@@ -281,6 +281,69 @@ async def noop_handler(event):
 
 
 # ============================================================================
+# FORWARD-TO-ADD
+# ============================================================================
+
+
+@bot.on(events.NewMessage(func=lambda e: e.forward is not None))
+async def forward_add_handler(event):
+    """Add a chat to the allowlist by forwarding a message from it."""
+    if not is_owner(event):
+        return
+
+    fwd = event.forward
+    chat_id = None
+    title = None
+
+    # Try to get the chat the message was forwarded from
+    if fwd.chat_id:
+        chat_id = fwd.chat_id
+        try:
+            entity = await user_client.get_entity(chat_id)
+            title = getattr(entity, "title", None) or getattr(entity, "first_name", "Unknown")
+        except Exception:
+            title = "Unknown"
+    elif fwd.from_id:
+        # Forwarded from a user (DM)
+        try:
+            from telethon.tl.types import PeerUser, PeerChat, PeerChannel
+            if isinstance(fwd.from_id, (PeerChat, PeerChannel)):
+                chat_id = fwd.from_id.chat_id if isinstance(fwd.from_id, PeerChat) else fwd.from_id.channel_id
+                entity = await user_client.get_entity(chat_id)
+                title = getattr(entity, "title", None) or "Unknown"
+            elif isinstance(fwd.from_id, PeerUser):
+                chat_id = fwd.from_id.user_id
+                entity = await user_client.get_entity(chat_id)
+                title = getattr(entity, "first_name", "Unknown")
+        except Exception:
+            pass
+
+    if not chat_id:
+        await event.respond("Couldn't extract a chat from that forwarded message. Try forwarding from a group or channel.")
+        return
+
+    if permissions.is_chat_allowed(chat_id):
+        await event.respond(f"**{title}** (ID: `{chat_id}`) is already allowlisted.")
+    else:
+        permissions.add_chat(chat_id, title)
+        await event.respond(
+            f"**Added to allowlist:** {title} (ID: `{chat_id}`)\n\n"
+            "This chat's messages are now accessible via MCP.",
+            buttons=[Button.inline("❌ Remove", data=f"fwd_remove:{chat_id}")],
+        )
+
+
+@bot.on(events.CallbackQuery(pattern=rb"fwd_remove:(-?\d+)"))
+async def fwd_remove_handler(event):
+    if not is_owner(event):
+        return
+    await event.answer()
+    chat_id = int(event.pattern_match.group(1).decode())
+    permissions.toggle_chat(chat_id)
+    await event.edit("Removed from allowlist.")
+
+
+# ============================================================================
 # KEY GENERATION
 # ============================================================================
 
