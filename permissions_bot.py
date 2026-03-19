@@ -426,6 +426,7 @@ async def auth_handler(event):
         img.save(buf, format="PNG")
         buf.seek(0)
 
+        buf.name = "qr_login.png"
         await event.respond(
             "**Scan this QR code with Telegram on your phone:**\n\n"
             "Open Telegram → Settings → Devices → Link Desktop Device\n\n"
@@ -450,6 +451,7 @@ async def auth_handler(event):
                     buf2 = io.BytesIO()
                     img2.save(buf2, format="PNG")
                     buf2.seek(0)
+                    buf2.name = "qr_login.png"
                     await event.respond(
                         f"**QR code expired.** Here's a new one (attempt {attempt + 2}/{max_attempts}):",
                         file=buf2,
