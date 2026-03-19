@@ -158,6 +158,13 @@ async def start_handler(event):
     if not is_owner(event):
         return
 
+    if not user_client:
+        await event.respond(
+            "**No Telegram account linked yet.**\n\n"
+            "Run /auth to connect your Telegram account first.",
+        )
+        return
+
     keyboard = build_permissions_keyboard()
     await event.respond(
         "**Telegram MCP Permissions**\n\n"
