@@ -401,7 +401,7 @@ async def get_chats(page: int = 1, page_size: int = 20) -> str:
         page_size: Number of chats per page.
     """
     try:
-        dialogs = await client.get_dialogs()
+        dialogs = await client.get_dialogs(limit=None)
 
         # Filter to allowlisted chats only
         allowlisted = perms.get_allowlisted_chats()
@@ -988,12 +988,16 @@ async def list_chats(chat_type: str = None, limit: int = 20) -> str:
         limit: Maximum number of chats to retrieve.
     """
     try:
-        dialogs = await client.get_dialogs(limit=limit)
+        dialogs = await client.get_dialogs(limit=None)
 
         # Filter to allowlisted chats only
         allowlisted = perms.get_allowlisted_chats()
         allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
         dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
+
+        # Apply limit after allowlist filtering
+        if limit:
+            dialogs = dialogs[:limit]
 
         results = []
         for dialog in dialogs:
