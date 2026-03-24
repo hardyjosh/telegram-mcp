@@ -42,6 +42,9 @@ import re
 from functools import wraps
 import telethon.errors.rpcerrorlist
 
+import permissions as perms
+import auth_manager
+
 
 class ValidationError(Exception):
     """Custom exception for validation errors."""
@@ -68,14 +71,29 @@ TELEGRAM_SESSION_NAME = os.getenv("TELEGRAM_SESSION_NAME")
 # Check if a string session exists in environment, otherwise use file-based session
 SESSION_STRING = os.getenv("TELEGRAM_SESSION_STRING")
 
+# Fall back to DB-stored session if no env var
+if not SESSION_STRING:
+    try:
+        auth_manager.init_auth_db()
+        SESSION_STRING = auth_manager.get_session()
+        if SESSION_STRING:
+            print("Using session string from database")
+    except Exception:
+        pass
+
 mcp = FastMCP("telegram")
 
 if SESSION_STRING:
     # Use the string session if available
     client = TelegramClient(StringSession(SESSION_STRING), TELEGRAM_API_ID, TELEGRAM_API_HASH)
-else:
+elif TELEGRAM_SESSION_NAME:
     # Use file-based session
     client = TelegramClient(TELEGRAM_SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+else:
+    # No session available — client will be None (degraded mode)
+    client = None
+    print("WARNING: No Telegram session configured. MCP tools will not work.")
+    print("Use /auth in the permissions bot to authenticate.")
 
 # Setup robust logging with both file and console output
 logger = logging.getLogger("telegram_mcp")
@@ -185,11 +203,20 @@ def validate_id(*param_names_to_validate):
     Decorator to validate chat_id and user_id parameters, including lists of IDs.
     It checks for valid integer ranges, string representations of integers,
     and username formats.
+
+    Also enforces chat permissions when a chat_id or group_id parameter is present.
     """
 
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            # Enforce permissions for chat-scoped tools
+            chat_id = kwargs.get("chat_id") or kwargs.get("group_id")
+            if chat_id is not None:
+                allowed, reason = perms.check_permission(func.__name__, chat_id)
+                if not allowed:
+                    return f"Permission denied: {reason}"
+
             for param_name in param_names_to_validate:
                 if param_name not in kwargs or kwargs[param_name] is None:
                     continue
@@ -262,6 +289,31 @@ def validate_id(*param_names_to_validate):
         return wrapper
 
     return decorator
+
+
+def enforce_permissions(func):
+    """Decorator that enforces chat permissions before tool execution.
+
+    Checks the permissions database to verify:
+    1. The required global permission (read/write) is enabled
+    2. The target chat is in the allowlist and enabled
+
+    If permissions are not configured (no DB / empty allowlist), all calls
+    are allowed (open by default, restrictive when configured).
+    """
+
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        # Find chat_id in kwargs (most tools use 'chat_id', some use 'group_id')
+        chat_id = kwargs.get("chat_id") or kwargs.get("group_id")
+
+        allowed, reason = perms.check_permission(func.__name__, chat_id)
+        if not allowed:
+            return f"Permission denied: {reason}"
+
+        return await func(*args, **kwargs)
+
+    return wrapper
 
 
 def format_entity(entity) -> Dict[str, Any]:
@@ -349,13 +401,20 @@ async def get_chats(page: int = 1, page_size: int = 20) -> str:
         page_size: Number of chats per page.
     """
     try:
-        dialogs = await client.get_dialogs()
+        all_dialogs = await client.get_dialogs(limit=None)
+
+        # Filter to allowlisted chats only
+        allowlisted = perms.get_allowlisted_chats()
+        allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
+        filtered = list(d for d in all_dialogs if d.entity.id in allowed_ids)
+
+        total = len(filtered)
         start = (page - 1) * page_size
         end = start + page_size
-        if start >= len(dialogs):
-            return "Page out of range."
-        chats = dialogs[start:end]
-        lines = []
+        if start >= total:
+            return f"Page out of range. Total chats: {total}, pages: {(total + page_size - 1) // page_size}"
+        chats = filtered[start:end]
+        lines = [f"Total: {total} chats (page {page}/{(total + page_size - 1) // page_size})"]
         for dialog in chats:
             entity = dialog.entity
             chat_id = entity.id
@@ -930,7 +989,16 @@ async def list_chats(chat_type: str = None, limit: int = 20) -> str:
         limit: Maximum number of chats to retrieve.
     """
     try:
-        dialogs = await client.get_dialogs(limit=limit)
+        dialogs = await client.get_dialogs(limit=None)
+
+        # Filter to allowlisted chats only
+        allowlisted = perms.get_allowlisted_chats()
+        allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
+        dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
+
+        # Apply limit after allowlist filtering
+        if limit:
+            dialogs = dialogs[:limit]
 
         results = []
         for dialog in dialogs:
@@ -4203,8 +4271,49 @@ async def reorder_folders(folder_ids: List[int]) -> str:
         )
 
 
+# --- Permission enforcement ---
+# Wrap mcp.call_tool to check permissions before executing any tool.
+_original_call_tool = mcp.call_tool
+
+
+async def _checked_call_tool(name: str, arguments: dict) -> Any:
+    """Permission-checking wrapper around tool execution."""
+    # Extract chat_id from arguments if present
+    chat_id = arguments.get("chat_id")
+    if chat_id is not None:
+        try:
+            chat_id = int(chat_id)
+        except (ValueError, TypeError):
+            chat_id = None
+
+    allowed, reason = perms.check_permission(name, chat_id)
+    if not allowed:
+        from mcp.types import TextContent
+        return [TextContent(type="text", text=f"Permission denied: {reason}")]
+
+    return await _original_call_tool(name, arguments)
+
+
+mcp.call_tool = _checked_call_tool
+
+
 async def _main() -> None:
     try:
+        # Initialise permissions database
+        perms.init_db()
+
+        # Build permission map from registered tool annotations
+        tools_info = []
+        for tool_name, tool in mcp._tool_manager._tools.items():
+            annotations = {}
+            if tool.annotations:
+                annotations = {
+                    "readOnlyHint": getattr(tool.annotations, "readOnlyHint", False),
+                    "destructiveHint": getattr(tool.annotations, "destructiveHint", False),
+                }
+            tools_info.append({"name": tool_name, "annotations": annotations})
+        perms.build_tool_permission_map(tools_info)
+
         # Start the Telethon client non-interactively
         print("Starting Telegram client...")
         await client.start()

@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application code
 COPY main.py .
+COPY permissions.py .
 # COPY session_string_generator.py . # Optional: if needed within the container, otherwise can be run outside
 
 # Create a non-root user and switch to it

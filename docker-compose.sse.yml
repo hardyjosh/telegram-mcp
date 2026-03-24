@@ -25,6 +25,8 @@ services:
       - MCP_BEARER_TOKEN=${MCP_BEARER_TOKEN:-}
       - OAUTH_CLIENT_ID=${OAUTH_CLIENT_ID:-}
       - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET:-}
+      - PERMISSIONS_BOT_TOKEN=${PERMISSIONS_BOT_TOKEN:-}
+      - PERMISSIONS_BOT_OWNER_ID=${PERMISSIONS_BOT_OWNER_ID:-}
     # Optional: mount for persistent session file (if not using SESSION_STRING)
     # volumes:
     #   - telegram-data:/home/appuser/data

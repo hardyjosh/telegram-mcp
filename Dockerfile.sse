@@ -18,6 +18,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy application code
 COPY main.py .
+COPY permissions.py .
+COPY permissions_bot.py .
+COPY auth_manager.py .
+COPY entrypoint.sh .
 COPY src/ ./src/
 
 # Create a non-root user for security
@@ -43,5 +47,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # Expose the HTTP port
 EXPOSE ${PORT}
 
-# Run the SSE server
-CMD ["python", "src/server_sse.py"]
+# Run both SSE server and permissions bot (if configured)
+CMD ["bash", "entrypoint.sh"]

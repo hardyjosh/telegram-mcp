@@ -10,6 +10,7 @@ primary_region = "lhr"  # London - change to your preferred region
 [env]
   PORT = "8080"
   HOST = "0.0.0.0"
+  TELEGRAM_MCP_PERMISSIONS_DB = "/data/permissions.db"
 
 [http_service]
   internal_port = 8080
@@ -28,6 +29,10 @@ primary_region = "lhr"  # London - change to your preferred region
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
+
+[mounts]
+  source = "telegram_mcp_data"
+  destination = "/data"
 
 [checks]
   [checks.health]

@@ -744,6 +744,112 @@ The code is designed to be robust against common Telegram API issues and limitat
 
 ---
 
+## 🔐 Chat Permissions
+
+Control exactly which chats are exposed to AI agents. This is essential for multi-user or team deployments where you don't want your entire Telegram exposed.
+
+### How It Works
+
+The permissions system has two layers:
+
+1. **Global permissions** — toggle what capabilities are available (read messages, send messages)
+2. **Chat allowlist** — toggle which specific chats those permissions apply to
+
+If no chats are allowlisted, everything works as before (open access). Once you add your first chat to the allowlist, only allowlisted chats are accessible.
+
+### Architecture
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
+│ Permissions Bot  │────▶│  permissions.db   │◀────│  MCP Server │
+│ (Telegram UI)    │     │  (shared SQLite)  │     │  (enforces) │
+└─────────────────┘     └──────────────────┘     └─────────────┘
+     ▲                                                   ▲
+     │ /start                                           │ tool calls
+     │                                                   │
+   You                                             AI Agent
+```
+
+The **permissions bot** and the **MCP server** share the same SQLite database. You manage permissions via the bot's inline keyboard UI. The MCP server enforces those permissions on every tool call.
+
+### Setup
+
+#### 1. Create a management bot
+
+Message [@BotFather](https://t.me/BotFather) on Telegram and create a new bot. Save the token.
+
+#### 2. Add environment variables
+
+```bash
+# .env
+PERMISSIONS_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
+PERMISSIONS_BOT_OWNER_ID=123456789  # Your Telegram user ID
+```
+
+The `PERMISSIONS_BOT_OWNER_ID` ensures only you can manage permissions — the bot ignores everyone else.
+
+#### 3. Run the permissions bot alongside the MCP server
+
+```bash
+# Terminal 1: MCP server (as before)
+uv run python main.py
+
+# Terminal 2: Permissions management bot
+uv run python permissions_bot.py
+```
+
+Or with Docker, add the bot as a second service in your compose file.
+
+#### 4. Configure permissions
+
+1. Open a DM with your new bot on Telegram
+2. Send `/start`
+3. You'll see the permissions screen:
+
+```
+Telegram MCP Permissions
+
+Toggle global permissions below, then manage
+which chats are accessible.
+
+[✅ Read    ] [❌ Write   ]
+[💬 Manage Chats          ]
+```
+
+4. Tap **Manage Chats** to see all your Telegram chats
+5. Tap any chat to toggle it on/off:
+
+```
+Select chats to allow access:
+
+✅ = allowed, ⬜ = not allowed
+
+[✅ Work Project Alpha    ]
+[✅ Work Project Beta     ]
+[⬜ Family Group          ]
+[⬜ Random Chat           ]
+
+      [◀️] 1/4 [▶️]
+[⬅️ Back to Permissions   ]
+```
+
+### What gets enforced
+
+- **Chat-scoped tools** (anything taking `chat_id`) — blocked if the chat isn't allowlisted
+- **Chat listing tools** (`get_chats`, `list_chats`) — filtered to only show allowlisted chats
+- **Global tools** (`get_me`, `list_contacts`, etc.) — unaffected by chat permissions
+- **Read vs write** — if global write is off, no tool can send messages even to allowlisted chats
+
+### Optional: custom database path
+
+```bash
+TELEGRAM_MCP_PERMISSIONS_DB=/path/to/permissions.db
+```
+
+Defaults to `./permissions.db` in the project directory.
+
+---
+
 ## 🔒 Security Considerations
 - **Never commit your `.env` or session string.**
 - The session string gives full access to your Telegram account—keep it safe!

@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the existing MCP server and Telegram client
 from main import mcp, client
+import auth_manager
 
 # ============================================================================
 # Configuration
@@ -46,7 +47,8 @@ OAUTH_CLIENT_SECRET = os.environ.get("OAUTH_CLIENT_SECRET")
 # Authentication Middleware
 # ============================================================================
 
-# Global set to store valid OAuth tokens
+# OAuth tokens — bounded LRU-style set (max 100 tokens in memory)
+_MAX_OAUTH_TOKENS = 100
 VALID_TOKENS: set = set()
 
 
@@ -93,8 +95,12 @@ class BearerAuthMiddleware:
 
             token = auth_header[7:]  # Remove "Bearer " prefix
 
-            # Check if token is valid (either from OAuth flow or static BEARER_TOKEN)
-            is_valid = token in VALID_TOKENS or (BEARER_TOKEN and token == BEARER_TOKEN)
+            # Check if token is valid (OAuth flow, static env var, or DB-generated)
+            is_valid = (
+                token in VALID_TOKENS
+                or (BEARER_TOKEN and token == BEARER_TOKEN)
+                or auth_manager.validate_token(token)
+            )
 
             if not is_valid:
                 response = JSONResponse({"error": "Invalid token"}, status_code=401)
@@ -113,7 +119,7 @@ async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint for load balancers and monitoring."""
     # Check if Telegram client is connected
     try:
-        connected = client.is_connected()
+        connected = client.is_connected() if client else False
     except Exception:
         connected = False
 
@@ -248,6 +254,9 @@ async def token_endpoint(request: Request) -> JSONResponse:
     global VALID_TOKENS
     if "VALID_TOKENS" not in globals():
         VALID_TOKENS = set()
+    # Evict oldest tokens if at capacity
+    if len(VALID_TOKENS) >= _MAX_OAUTH_TOKENS:
+        VALID_TOKENS.clear()
     VALID_TOKENS.add(access_token)
 
     return JSONResponse(
@@ -323,14 +332,51 @@ async def info_page(request: Request) -> HTMLResponse:
 @asynccontextmanager
 async def lifespan(app):
     """Lifespan context manager to start/stop Telegram client with uvicorn's event loop."""
-    print("Starting Telegram client...")
-    await client.start()
-    print("Telegram client connected.")
+    # Initialise permissions and auth
+    import permissions as perms
+    perms.init_db()
+    auth_manager.init_auth_db()
+
+    # Build permission map from registered tool annotations
+    tools_info = []
+    for tool_name, tool in mcp._tool_manager._tools.items():
+        annotations = {}
+        if tool.annotations:
+            annotations = {
+                "readOnlyHint": getattr(tool.annotations, "readOnlyHint", False),
+                "destructiveHint": getattr(tool.annotations, "destructiveHint", False),
+            }
+        tools_info.append({"name": tool_name, "annotations": annotations})
+    perms.build_tool_permission_map(tools_info)
+    write_tools = [t["name"] for t in tools_info if t["annotations"].get("destructiveHint")]
+    print(f"Permission map built: {len(perms.TOOL_PERMISSION_MAP)} tools mapped")
+
+    # Patch tool_manager.call_tool to enforce permissions on ALL tool calls
+    _original_call_tool = mcp._tool_manager.call_tool
+
+    async def _checked_call_tool(name, arguments, **kwargs):
+        chat_id = arguments.get("chat_id") or arguments.get("group_id")
+        allowed, reason = perms.check_permission(name, chat_id)
+        if not allowed:
+            from mcp.server.fastmcp.tools.base import ToolError
+            raise ToolError(f"Permission denied: {reason}")
+        return await _original_call_tool(name, arguments, **kwargs)
+
+    mcp._tool_manager.call_tool = _checked_call_tool
+
+    if client:
+        print("Starting Telegram client...")
+        await client.start()
+        print("Telegram client connected.")
+    else:
+        print("WARNING: No Telegram session — running in degraded mode.")
+        print("Use /auth in the permissions bot to authenticate.")
     yield
     # Cleanup on shutdown
-    print("Disconnecting Telegram client...")
-    await client.disconnect()
-    print("Telegram client disconnected.")
+    if client and client.is_connected():
+        print("Disconnecting Telegram client...")
+        await client.disconnect()
+        print("Telegram client disconnected.")
 
 
 def create_app_with_lifespan() -> Starlette:
@@ -363,14 +409,12 @@ def create_app_with_lifespan() -> Starlette:
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
-    # Only require auth if OAuth credentials are configured
-    # Protect MCP endpoints but NOT OAuth/health endpoints
-    if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
-        app = BearerAuthMiddleware(
-            app,
-            protected_paths=["/sse", "/messages", "/mcp"],
-            # Note: Root "/" is also MCP but handled by exclude logic below
-        )
+    # Always apply auth middleware — it checks DB tokens, static bearer token,
+    # and OAuth tokens. Without this, MCP endpoints are completely open.
+    app = BearerAuthMiddleware(
+        app,
+        protected_paths=["/sse", "/messages", "/mcp"],
+    )
 
     return app
 
