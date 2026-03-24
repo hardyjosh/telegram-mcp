@@ -401,19 +401,20 @@ async def get_chats(page: int = 1, page_size: int = 20) -> str:
         page_size: Number of chats per page.
     """
     try:
-        dialogs = await client.get_dialogs(limit=None)
+        all_dialogs = await client.get_dialogs(limit=None)
 
         # Filter to allowlisted chats only
         allowlisted = perms.get_allowlisted_chats()
         allowed_ids = {c["chat_id"] for c in allowlisted if c["enabled"]}
-        dialogs = [d for d in dialogs if d.entity.id in allowed_ids]
+        filtered = list(d for d in all_dialogs if d.entity.id in allowed_ids)
 
+        total = len(filtered)
         start = (page - 1) * page_size
         end = start + page_size
-        if start >= len(dialogs):
-            return "Page out of range."
-        chats = dialogs[start:end]
-        lines = []
+        if start >= total:
+            return f"Page out of range. Total chats: {total}, pages: {(total + page_size - 1) // page_size}"
+        chats = filtered[start:end]
+        lines = [f"Total: {total} chats (page {page}/{(total + page_size - 1) // page_size})"]
         for dialog in chats:
             entity = dialog.entity
             chat_id = entity.id
